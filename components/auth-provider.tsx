@@ -3,13 +3,12 @@
 import type React from "react"
 
 import { createContext, useContext, useEffect, useState } from "react"
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
 import { useRouter } from "next/navigation"
+import { createClient } from "@/utils/supabase/client"
 import { useToast } from "@/components/ui/use-toast"
+import type { User } from "@supabase/supabase-js"
 
-type User = {
-  id: string
-  email: string
+type UserWithProfile = User & {
   role: "student" | "mentor" | "admin"
   xp: number
   level: number
@@ -18,7 +17,7 @@ type User = {
 }
 
 type AuthContextType = {
-  user: User | null
+  user: UserWithProfile | null
   loading: boolean
   signIn: (email: string, password: string) => Promise<void>
   signInWithGoogle: () => Promise<void>
@@ -30,11 +29,11 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
+  const [user, setUser] = useState<UserWithProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const router = useRouter()
   const { toast } = useToast()
-  const supabase = createClientComponentClient()
+  const supabase = createClient()
 
   useEffect(() => {
     const getUser = async () => {
@@ -43,9 +42,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } = await supabase.auth.getSession()
 
       if (session) {
-        const { data: userData } = await supabase.from("users").select("*").eq("id", session.user.id).single()
+        const { data: userData, error } = await supabase.from("users").select("*").eq("id", session.user.id).single()
 
-        setUser(userData as User)
+        if (error) {
+          console.error("Error fetching user data:", error)
+          setUser(null)
+        } else {
+          setUser({
+            ...session.user,
+            role: userData.role,
+            xp: userData.xp,
+            level: userData.level,
+            name: userData.name,
+            avatar_url: userData.avatar_url,
+          })
+        }
       }
 
       setLoading(false)
@@ -57,9 +68,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session) {
-        const { data: userData } = await supabase.from("users").select("*").eq("id", session.user.id).single()
+        const { data: userData, error } = await supabase.from("users").select("*").eq("id", session.user.id).single()
 
-        setUser(userData as User)
+        if (error) {
+          console.error("Error fetching user data:", error)
+          setUser(null)
+        } else {
+          setUser({
+            ...session.user,
+            role: userData.role,
+            xp: userData.xp,
+            level: userData.level,
+            name: userData.name,
+            avatar_url: userData.avatar_url,
+          })
+        }
       } else {
         setUser(null)
       }
@@ -160,14 +183,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (data.user) {
         // Create user profile in users table
-        await supabase.from("users").insert({
+        const { error: profileError } = await supabase.from("users").insert({
           id: data.user.id,
-          email: data.user.email,
+          email: data.user.email!,
           name,
           role: "student",
           xp: 0,
           level: 1,
         })
+
+        if (profileError) {
+          console.error("Error creating user profile:", profileError)
+        }
       }
 
       toast({

@@ -22,12 +22,16 @@ export default function DashboardPage() {
     }
   }, [user, loading, router])
 
-  if (loading || !user) {
+  if (loading) {
     return (
       <div className="container flex h-screen items-center justify-center">
         <div className="text-center">Loading...</div>
       </div>
     )
+  }
+
+  if (!user) {
+    return null // This will never render because of the redirect in useEffect
   }
 
   // Mock data for the dashboard
