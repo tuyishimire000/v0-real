@@ -119,29 +119,47 @@ export async function getRecentEnrollments() {
   const supabase = createClient()
 
   try {
-    const { data: enrollments, error } = await supabase
+    // Get enrollments first
+    const { data: enrollments, error: enrollmentsError } = await supabase
       .from("course_enrollments")
-      .select(`
-        id,
-        enrolled_at,
-        user:users(name),
-        course:courses(title)
-      `)
+      .select("id, enrolled_at, user_id, course_id")
       .order("enrolled_at", { ascending: false })
       .limit(10)
 
-    if (error) {
-      console.error("Error fetching recent enrollments:", error)
+    if (enrollmentsError) {
+      console.error("Error fetching recent enrollments:", enrollmentsError)
       return { success: true, enrollments: [] }
     }
 
-    const formattedEnrollments =
-      enrollments?.map((enrollment: any) => ({
-        id: enrollment.id,
-        user_name: enrollment.user?.name || "Unknown User",
-        course_title: enrollment.course?.title || "Unknown Course",
-        enrolled_at: enrollment.enrolled_at,
-      })) || []
+    if (!enrollments || enrollments.length === 0) {
+      return { success: true, enrollments: [] }
+    }
+
+    // Get user and course details separately
+    const formattedEnrollments = await Promise.all(
+      enrollments.map(async (enrollment) => {
+        try {
+          const [userResult, courseResult] = await Promise.all([
+            supabase.from("users").select("name").eq("id", enrollment.user_id).single(),
+            supabase.from("courses").select("title").eq("id", enrollment.course_id).single(),
+          ])
+
+          return {
+            id: enrollment.id,
+            user_name: userResult.data?.name || "Unknown User",
+            course_title: courseResult.data?.title || "Unknown Course",
+            enrolled_at: enrollment.enrolled_at,
+          }
+        } catch (error) {
+          return {
+            id: enrollment.id,
+            user_name: "Unknown User",
+            course_title: "Unknown Course",
+            enrolled_at: enrollment.enrolled_at,
+          }
+        }
+      }),
+    )
 
     return { success: true, enrollments: formattedEnrollments }
   } catch (error: any) {
@@ -154,31 +172,49 @@ export async function getRecentSubmissions() {
   const supabase = createClient()
 
   try {
-    const { data: submissions, error } = await supabase
+    // Get submissions first
+    const { data: submissions, error: submissionsError } = await supabase
       .from("submissions")
-      .select(`
-        id,
-        status,
-        submitted_at,
-        user:users(name),
-        challenge:challenges(title)
-      `)
+      .select("id, status, submitted_at, user_id, challenge_id")
       .order("submitted_at", { ascending: false })
       .limit(10)
 
-    if (error) {
-      console.error("Error fetching recent submissions:", error)
+    if (submissionsError) {
+      console.error("Error fetching recent submissions:", submissionsError)
       return { success: true, submissions: [] }
     }
 
-    const formattedSubmissions =
-      submissions?.map((submission: any) => ({
-        id: submission.id,
-        user_name: submission.user?.name || "Unknown User",
-        challenge_title: submission.challenge?.title || "Unknown Challenge",
-        status: submission.status,
-        submitted_at: submission.submitted_at,
-      })) || []
+    if (!submissions || submissions.length === 0) {
+      return { success: true, submissions: [] }
+    }
+
+    // Get user and challenge details separately
+    const formattedSubmissions = await Promise.all(
+      submissions.map(async (submission) => {
+        try {
+          const [userResult, challengeResult] = await Promise.all([
+            supabase.from("users").select("name").eq("id", submission.user_id).single(),
+            supabase.from("challenges").select("title").eq("id", submission.challenge_id).single(),
+          ])
+
+          return {
+            id: submission.id,
+            user_name: userResult.data?.name || "Unknown User",
+            challenge_title: challengeResult.data?.title || "Unknown Challenge",
+            status: submission.status,
+            submitted_at: submission.submitted_at,
+          }
+        } catch (error) {
+          return {
+            id: submission.id,
+            user_name: "Unknown User",
+            challenge_title: "Unknown Challenge",
+            status: submission.status,
+            submitted_at: submission.submitted_at,
+          }
+        }
+      }),
+    )
 
     return { success: true, submissions: formattedSubmissions }
   } catch (error: any) {
@@ -254,19 +290,7 @@ export async function getAllCourses(page = 1, limit = 20, search?: string) {
   const supabase = createClient()
 
   try {
-    let query = supabase
-      .from("courses")
-      .select(
-        `
-        *,
-        instructor:users(name),
-        enrollments:course_enrollments(id),
-        modules:modules(id),
-        challenges:challenges(id)
-      `,
-        { count: "exact" },
-      )
-      .order("created_at", { ascending: false })
+    let query = supabase.from("courses").select("*", { count: "exact" }).order("created_at", { ascending: false })
 
     if (search) {
       query = query.ilike("title", `%${search}%`)
@@ -278,14 +302,35 @@ export async function getAllCourses(page = 1, limit = 20, search?: string) {
       throw error
     }
 
-    const formattedCourses =
-      courses?.map((course: any) => ({
-        ...course,
-        instructor_name: course.instructor?.name || "Unknown",
-        enrollment_count: course.enrollments?.length || 0,
-        module_count: course.modules?.length || 0,
-        challenge_count: course.challenges?.length || 0,
-      })) || []
+    // Get additional stats for each course
+    const formattedCourses = await Promise.all(
+      (courses || []).map(async (course) => {
+        try {
+          const [instructorResult, enrollmentsResult, modulesResult, challengesResult] = await Promise.all([
+            supabase.from("users").select("name").eq("id", course.instructor_id).single(),
+            supabase.from("course_enrollments").select("id", { count: "exact", head: true }).eq("course_id", course.id),
+            supabase.from("modules").select("id", { count: "exact", head: true }).eq("course_id", course.id),
+            supabase.from("challenges").select("id", { count: "exact", head: true }).eq("course_id", course.id),
+          ])
+
+          return {
+            ...course,
+            instructor_name: instructorResult.data?.name || "Unknown",
+            enrollment_count: enrollmentsResult.count || 0,
+            module_count: modulesResult.count || 0,
+            challenge_count: challengesResult.count || 0,
+          }
+        } catch (error) {
+          return {
+            ...course,
+            instructor_name: "Unknown",
+            enrollment_count: 0,
+            module_count: 0,
+            challenge_count: 0,
+          }
+        }
+      }),
+    )
 
     return {
       success: true,
@@ -341,6 +386,13 @@ export async function createSampleData() {
   const supabase = createClient()
 
   try {
+    // Check if sample data already exists
+    const { data: existingCourses } = await supabase.from("courses").select("id").limit(1)
+
+    if (existingCourses && existingCourses.length > 0) {
+      return { success: true, message: "Sample data already exists" }
+    }
+
     // Create sample courses
     const { data: courses, error: coursesError } = await supabase
       .from("courses")
@@ -365,6 +417,7 @@ export async function createSampleData() {
 
     if (coursesError) {
       console.error("Error creating sample courses:", coursesError)
+      return { success: false, error: coursesError.message }
     }
 
     // Create sample challenges if courses were created
@@ -390,6 +443,61 @@ export async function createSampleData() {
 
       if (challengesError) {
         console.error("Error creating sample challenges:", challengesError)
+        return { success: false, error: challengesError.message }
+      }
+
+      // Create sample modules for the first course
+      const { data: modules, error: modulesError } = await supabase
+        .from("modules")
+        .insert([
+          {
+            course_id: courses[0].id,
+            title: "Introduction to Digital Marketing",
+            description: "Get started with digital marketing fundamentals",
+            order_index: 1,
+          },
+          {
+            course_id: courses[0].id,
+            title: "Social Media Marketing",
+            description: "Learn how to leverage social media platforms",
+            order_index: 2,
+          },
+        ])
+        .select()
+
+      if (modulesError) {
+        console.error("Error creating sample modules:", modulesError)
+      }
+
+      // Create sample lessons if modules were created
+      if (modules && modules.length > 0) {
+        const { error: lessonsError } = await supabase.from("lessons").insert([
+          {
+            module_id: modules[0].id,
+            title: "What is Digital Marketing?",
+            content: "Digital marketing encompasses all marketing efforts that use electronic devices or the internet.",
+            duration: 625, // 10:25 in seconds
+            order_index: 1,
+          },
+          {
+            module_id: modules[0].id,
+            title: "The Digital Marketing Landscape",
+            content: "Understanding the current state of digital marketing and emerging trends.",
+            duration: 930, // 15:30 in seconds
+            order_index: 2,
+          },
+          {
+            module_id: modules[1].id,
+            title: "Social Media Platforms Overview",
+            content: "A comprehensive look at major social media platforms and their unique characteristics.",
+            duration: 1095, // 18:15 in seconds
+            order_index: 1,
+          },
+        ])
+
+        if (lessonsError) {
+          console.error("Error creating sample lessons:", lessonsError)
+        }
       }
     }
 
