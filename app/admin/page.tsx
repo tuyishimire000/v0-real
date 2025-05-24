@@ -1,18 +1,62 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { BookOpen, DollarSign, FileText, Users } from "lucide-react"
+import { BookOpen, Users, TrendingUp, Award } from "lucide-react"
 
 import { useAuth } from "@/components/auth-provider"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Badge } from "@/components/ui/badge"
+import { useToast } from "@/components/ui/use-toast"
+import { getAdminStats, getRecentUsers, getRecentEnrollments, getRecentSubmissions } from "@/app/actions/admin"
+
+type AdminStats = {
+  totalUsers: number
+  totalCourses: number
+  totalEnrollments: number
+  totalSubmissions: number
+  completionRate: number
+  activeUsers: number
+  monthlyGrowth: number
+}
+
+type RecentUser = {
+  id: string
+  name: string
+  email: string
+  role: string
+  created_at: string
+  xp: number
+  level: number
+}
+
+type RecentEnrollment = {
+  id: string
+  user_name: string
+  course_title: string
+  enrolled_at: string
+}
+
+type RecentSubmission = {
+  id: string
+  user_name: string
+  challenge_title: string
+  status: string
+  submitted_at: string
+}
 
 export default function AdminDashboardPage() {
   const { user, loading } = useAuth()
   const router = useRouter()
+  const { toast } = useToast()
+  const [stats, setStats] = useState<AdminStats | null>(null)
+  const [recentUsers, setRecentUsers] = useState<RecentUser[]>([])
+  const [recentEnrollments, setRecentEnrollments] = useState<RecentEnrollment[]>([])
+  const [recentSubmissions, setRecentSubmissions] = useState<RecentSubmission[]>([])
+  const [loadingData, setLoadingData] = useState(true)
 
   useEffect(() => {
     if (!loading && (!user || user.role !== "admin")) {
@@ -20,15 +64,46 @@ export default function AdminDashboardPage() {
     }
   }, [user, loading, router])
 
-  if (loading || !user) {
+  useEffect(() => {
+    if (user?.role === "admin") {
+      fetchAdminData()
+    }
+  }, [user])
+
+  const fetchAdminData = async () => {
+    setLoadingData(true)
+    try {
+      const [statsResult, usersResult, enrollmentsResult, submissionsResult] = await Promise.all([
+        getAdminStats(),
+        getRecentUsers(),
+        getRecentEnrollments(),
+        getRecentSubmissions(),
+      ])
+
+      if (statsResult.success) setStats(statsResult.stats)
+      if (usersResult.success) setRecentUsers(usersResult.users)
+      if (enrollmentsResult.success) setRecentEnrollments(enrollmentsResult.enrollments)
+      if (submissionsResult.success) setRecentSubmissions(submissionsResult.submissions)
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to load admin data",
+        variant: "destructive",
+      })
+    } finally {
+      setLoadingData(false)
+    }
+  }
+
+  if (loading || loadingData) {
     return (
       <div className="container flex h-screen items-center justify-center">
-        <div className="text-center">Loading...</div>
+        <div className="text-center">Loading admin dashboard...</div>
       </div>
     )
   }
 
-  if (user.role !== "admin") {
+  if (!user || user.role !== "admin") {
     return (
       <div className="container flex h-screen items-center justify-center">
         <div className="text-center">
@@ -62,15 +137,16 @@ export default function AdminDashboardPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {/* Stats Cards */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Users</CardTitle>
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">1,245</div>
-            <p className="text-xs text-muted-foreground">+15% from last month</p>
+            <div className="text-2xl font-bold">{stats?.totalUsers || 0}</div>
+            <p className="text-xs text-muted-foreground">+{stats?.monthlyGrowth || 0}% from last month</p>
           </CardContent>
         </Card>
         <Card>
@@ -79,185 +155,211 @@ export default function AdminDashboardPage() {
             <BookOpen className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">12</div>
-            <p className="text-xs text-muted-foreground">2 courses added this month</p>
+            <div className="text-2xl font-bold">{stats?.totalCourses || 0}</div>
+            <p className="text-xs text-muted-foreground">Published courses</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Completion Rate</CardTitle>
-            <FileText className="h-4 w-4 text-muted-foreground" />
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">68%</div>
-            <p className="text-xs text-muted-foreground">+5% from last month</p>
+            <div className="text-2xl font-bold">{stats?.completionRate || 0}%</div>
+            <p className="text-xs text-muted-foreground">Average course completion</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Monthly Revenue</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Active Users</CardTitle>
+            <Award className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">$21,500</div>
-            <p className="text-xs text-muted-foreground">+12% from last month</p>
+            <div className="text-2xl font-bold">{stats?.activeUsers || 0}</div>
+            <p className="text-xs text-muted-foreground">Last 30 days</p>
           </CardContent>
         </Card>
       </div>
 
-      <div className="mt-6">
-        <Tabs defaultValue="users" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="users">User Management</TabsTrigger>
-            <TabsTrigger value="courses">Course Management</TabsTrigger>
-            <TabsTrigger value="payments">Payment History</TabsTrigger>
-          </TabsList>
-          <TabsContent value="users" className="space-y-4">
+      {/* Main Content Tabs */}
+      <Tabs defaultValue="overview" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="users">Recent Users</TabsTrigger>
+          <TabsTrigger value="enrollments">Enrollments</TabsTrigger>
+          <TabsTrigger value="submissions">Submissions</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <CardHeader>
-                <CardTitle>Recent User Registrations</CardTitle>
-                <CardDescription>New users who joined in the last 30 days</CardDescription>
+                <CardTitle>Platform Statistics</CardTitle>
+                <CardDescription>Key metrics for the learning platform</CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-4 text-sm font-medium text-muted-foreground">
-                    <div>Name</div>
-                    <div>Email</div>
-                    <div>Role</div>
-                    <div>Joined</div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center text-sm">
-                    <div>John Smith</div>
-                    <div>john@example.com</div>
-                    <div>Student</div>
-                    <div>2 days ago</div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center text-sm">
-                    <div>Sarah Johnson</div>
-                    <div>sarah@example.com</div>
-                    <div>Student</div>
-                    <div>3 days ago</div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center text-sm">
-                    <div>Michael Brown</div>
-                    <div>michael@example.com</div>
-                    <div>Mentor</div>
-                    <div>1 week ago</div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center text-sm">
-                    <div>Emma Wilson</div>
-                    <div>emma@example.com</div>
-                    <div>Student</div>
-                    <div>1 week ago</div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center text-sm">
-                    <div>David Lee</div>
-                    <div>david@example.com</div>
-                    <div>Student</div>
-                    <div>2 weeks ago</div>
-                  </div>
+              <CardContent className="space-y-4">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Total Enrollments</span>
+                  <span className="font-medium">{stats?.totalEnrollments || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Total Submissions</span>
+                  <span className="font-medium">{stats?.totalSubmissions || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Completion Rate</span>
+                  <span className="font-medium">{stats?.completionRate || 0}%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Monthly Growth</span>
+                  <span className="font-medium text-green-600">+{stats?.monthlyGrowth || 0}%</span>
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
-          <TabsContent value="courses" className="space-y-4">
+
             <Card>
               <CardHeader>
-                <CardTitle>Course Performance</CardTitle>
-                <CardDescription>Enrollment and completion rates for active courses</CardDescription>
+                <CardTitle>Quick Actions</CardTitle>
+                <CardDescription>Common administrative tasks</CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-4 text-sm font-medium text-muted-foreground">
-                    <div>Course</div>
-                    <div>Enrollments</div>
-                    <div>Completion Rate</div>
-                    <div>Avg. Rating</div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center text-sm">
-                    <div>Digital Marketing Mastery</div>
-                    <div>342</div>
-                    <div>68%</div>
-                    <div>4.8/5</div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center text-sm">
-                    <div>Copywriting Fundamentals</div>
-                    <div>256</div>
-                    <div>72%</div>
-                    <div>4.7/5</div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center text-sm">
-                    <div>Social Media Strategy</div>
-                    <div>189</div>
-                    <div>65%</div>
-                    <div>4.6/5</div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center text-sm">
-                    <div>Email Marketing</div>
-                    <div>145</div>
-                    <div>58%</div>
-                    <div>4.5/5</div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center text-sm">
-                    <div>SEO Fundamentals</div>
-                    <div>132</div>
-                    <div>62%</div>
-                    <div>4.7/5</div>
-                  </div>
-                </div>
+              <CardContent className="space-y-4">
+                <Button className="w-full" asChild>
+                  <Link href="/admin/courses/new">
+                    <BookOpen className="mr-2 h-4 w-4" />
+                    Create New Course
+                  </Link>
+                </Button>
+                <Button variant="outline" className="w-full" asChild>
+                  <Link href="/admin/challenges/new">
+                    <Award className="mr-2 h-4 w-4" />
+                    Create New Challenge
+                  </Link>
+                </Button>
+                <Button variant="outline" className="w-full" asChild>
+                  <Link href="/admin/users">
+                    <Users className="mr-2 h-4 w-4" />
+                    Manage Users
+                  </Link>
+                </Button>
+                <Button variant="outline" className="w-full" asChild>
+                  <Link href="/admin/analytics">
+                    <TrendingUp className="mr-2 h-4 w-4" />
+                    View Analytics
+                  </Link>
+                </Button>
               </CardContent>
             </Card>
-          </TabsContent>
-          <TabsContent value="payments" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Recent Payments</CardTitle>
-                <CardDescription>Latest transactions on the platform</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-4 text-sm font-medium text-muted-foreground">
-                    <div>User</div>
-                    <div>Amount</div>
-                    <div>Method</div>
-                    <div>Date</div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center text-sm">
-                    <div>John Smith</div>
-                    <div>$99.00</div>
-                    <div>Credit Card</div>
-                    <div>Today</div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center text-sm">
-                    <div>Sarah Johnson</div>
-                    <div>$99.00</div>
-                    <div>PayPal</div>
-                    <div>Yesterday</div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center text-sm">
-                    <div>Michael Brown</div>
-                    <div>$299.00</div>
-                    <div>Credit Card</div>
-                    <div>2 days ago</div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center text-sm">
-                    <div>Emma Wilson</div>
-                    <div>$99.00</div>
-                    <div>Mobile Money</div>
-                    <div>3 days ago</div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center text-sm">
-                    <div>David Lee</div>
-                    <div>$299.00</div>
-                    <div>Credit Card</div>
-                    <div>1 week ago</div>
-                  </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="users" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Recent User Registrations</CardTitle>
+              <CardDescription>New users who joined in the last 30 days</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="grid grid-cols-6 text-sm font-medium text-muted-foreground">
+                  <div>Name</div>
+                  <div>Email</div>
+                  <div>Role</div>
+                  <div>Level</div>
+                  <div>XP</div>
+                  <div>Joined</div>
                 </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      </div>
+                {recentUsers.map((user) => (
+                  <div key={user.id} className="grid grid-cols-6 items-center text-sm">
+                    <div className="font-medium">{user.name}</div>
+                    <div className="text-muted-foreground">{user.email}</div>
+                    <div>
+                      <Badge variant={user.role === "admin" ? "default" : "secondary"}>{user.role}</Badge>
+                    </div>
+                    <div>{user.level}</div>
+                    <div>{user.xp}</div>
+                    <div className="text-muted-foreground">{new Date(user.created_at).toLocaleDateString()}</div>
+                  </div>
+                ))}
+                {recentUsers.length === 0 && (
+                  <div className="text-center py-4 text-muted-foreground">No recent users</div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="enrollments" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Recent Course Enrollments</CardTitle>
+              <CardDescription>Latest course enrollments on the platform</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 text-sm font-medium text-muted-foreground">
+                  <div>Student</div>
+                  <div>Course</div>
+                  <div>Enrolled</div>
+                </div>
+                {recentEnrollments.map((enrollment) => (
+                  <div key={enrollment.id} className="grid grid-cols-3 items-center text-sm">
+                    <div className="font-medium">{enrollment.user_name}</div>
+                    <div>{enrollment.course_title}</div>
+                    <div className="text-muted-foreground">{new Date(enrollment.enrolled_at).toLocaleDateString()}</div>
+                  </div>
+                ))}
+                {recentEnrollments.length === 0 && (
+                  <div className="text-center py-4 text-muted-foreground">No recent enrollments</div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="submissions" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Recent Challenge Submissions</CardTitle>
+              <CardDescription>Latest challenge submissions requiring review</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="grid grid-cols-4 text-sm font-medium text-muted-foreground">
+                  <div>Student</div>
+                  <div>Challenge</div>
+                  <div>Status</div>
+                  <div>Submitted</div>
+                </div>
+                {recentSubmissions.map((submission) => (
+                  <div key={submission.id} className="grid grid-cols-4 items-center text-sm">
+                    <div className="font-medium">{submission.user_name}</div>
+                    <div>{submission.challenge_title}</div>
+                    <div>
+                      <Badge
+                        variant={
+                          submission.status === "approved"
+                            ? "default"
+                            : submission.status === "submitted"
+                              ? "secondary"
+                              : "destructive"
+                        }
+                      >
+                        {submission.status}
+                      </Badge>
+                    </div>
+                    <div className="text-muted-foreground">
+                      {new Date(submission.submitted_at).toLocaleDateString()}
+                    </div>
+                  </div>
+                ))}
+                {recentSubmissions.length === 0 && (
+                  <div className="text-center py-4 text-muted-foreground">No recent submissions</div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
