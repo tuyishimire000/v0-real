@@ -219,7 +219,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           data: {
             name,
           },
-          emailRedirectTo: `${window.location.origin}/auth/callback?type=signup`,
+          // Remove email confirmation for development
+          // emailRedirectTo: `${window.location.origin}/auth/callback?type=signup`,
         },
       })
 
@@ -236,29 +237,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      if (data.user && !data.session) {
-        // Email confirmation required
-        toast({
-          title: "Check your email",
-          description:
-            "We've sent you a confirmation link. Please check your email and click the link to activate your account.",
+      // For development, we'll handle both cases the same way
+      if (data.user) {
+        // Create user profile in users table immediately
+        const { error: profileError } = await supabase.from("users").insert({
+          id: data.user.id,
+          email: data.user.email!,
+          name,
+          role: "student",
+          xp: 0,
+          level: 1,
         })
 
-        // Store user data temporarily for when they confirm
-        localStorage.setItem("pendingUserData", JSON.stringify({ name, email }))
+        if (profileError) {
+          console.error("Error creating user profile:", profileError)
+          // Don't throw error, just log it - user can still proceed
+        }
 
-        // Redirect to a waiting page
-        router.push(`/confirm-email?email=${encodeURIComponent(email)}`)
-        return
-      }
-
-      if (data.user && data.session) {
-        // User is immediately signed in (email confirmation disabled)
         toast({
           title: "Account created successfully!",
           description: "Welcome to the learning platform. You can now start exploring courses.",
         })
-        router.push("/dashboard")
+
+        // If there's a session, redirect to dashboard, otherwise to login
+        if (data.session) {
+          router.push("/dashboard")
+        } else {
+          toast({
+            title: "Please sign in",
+            description: "Your account has been created. Please sign in to continue.",
+          })
+          router.push("/login")
+        }
       }
     } catch (error: any) {
       toast({
