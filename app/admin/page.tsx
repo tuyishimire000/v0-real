@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { BookOpen, Users, TrendingUp, Award } from "lucide-react"
+import { BookOpen, Users, TrendingUp, Award, Database } from "lucide-react"
 
 import { useAuth } from "@/components/auth-provider"
 import { Button } from "@/components/ui/button"
@@ -180,6 +180,25 @@ export default function AdminDashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {stats && stats.totalUsers === 0 && (
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle>Welcome to the Admin Dashboard!</CardTitle>
+            <CardDescription>
+              It looks like you're just getting started. Create some sample data to see the dashboard in action.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild>
+              <Link href="/admin/setup">
+                <Database className="mr-2 h-4 w-4" />
+                Set Up Sample Data
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Main Content Tabs */}
       <Tabs defaultValue="overview" className="space-y-4">
