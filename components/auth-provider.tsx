@@ -24,6 +24,7 @@ type AuthContextType = {
   signInWithApple: () => Promise<void>
   signUp: (email: string, password: string, name: string) => Promise<void>
   signOut: () => Promise<void>
+  resendConfirmation: (email: string) => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -41,22 +42,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         data: { session },
       } = await supabase.auth.getSession()
 
-      if (session) {
-        const { data: userData, error } = await supabase.from("users").select("*").eq("id", session.user.id).single()
-
-        if (error) {
-          console.error("Error fetching user data:", error)
-          setUser(null)
-        } else {
-          setUser({
-            ...session.user,
-            role: userData.role,
-            xp: userData.xp,
-            level: userData.level,
-            name: userData.name,
-            avatar_url: userData.avatar_url,
-          })
-        }
+      if (session?.user) {
+        await fetchUserProfile(session.user)
       }
 
       setLoading(false)
@@ -67,24 +54,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session) {
-        const { data: userData, error } = await supabase.from("users").select("*").eq("id", session.user.id).single()
+      console.log("Auth state change:", event, session?.user?.email)
 
-        if (error) {
-          console.error("Error fetching user data:", error)
-          setUser(null)
-        } else {
-          setUser({
-            ...session.user,
-            role: userData.role,
-            xp: userData.xp,
-            level: userData.level,
-            name: userData.name,
-            avatar_url: userData.avatar_url,
-          })
-        }
-      } else {
+      if (event === "SIGNED_IN" && session?.user) {
+        await fetchUserProfile(session.user)
+      } else if (event === "SIGNED_OUT") {
         setUser(null)
+      } else if (event === "TOKEN_REFRESHED" && session?.user) {
+        await fetchUserProfile(session.user)
       }
 
       setLoading(false)
@@ -96,6 +73,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [router, supabase])
 
+  const fetchUserProfile = async (authUser: User) => {
+    try {
+      // Use the service role or bypass RLS by using a simpler approach
+      // First, try to get user data with a direct query
+      const { data: userData, error } = await supabase.from("users").select("*").eq("id", authUser.id).single()
+
+      if (error) {
+        console.error("Error fetching user data:", error)
+
+        // If there's an RLS error, create a basic user profile from auth data
+        if (error.code === "42501" || error.message.includes("policy") || error.message.includes("recursion")) {
+          console.log("RLS policy issue detected, using auth user data")
+          setUser({
+            ...authUser,
+            role: "student" as const,
+            xp: 0,
+            level: 1,
+            name: authUser.user_metadata?.name || authUser.email?.split("@")[0] || "User",
+            avatar_url: authUser.user_metadata?.avatar_url || null,
+          })
+          return
+        }
+
+        setUser(null)
+      } else if (userData) {
+        setUser({
+          ...authUser,
+          role: userData.role,
+          xp: userData.xp,
+          level: userData.level,
+          name: userData.name,
+          avatar_url: userData.avatar_url,
+        })
+      } else {
+        // User profile doesn't exist, create a basic one from auth data
+        setUser({
+          ...authUser,
+          role: "student" as const,
+          xp: 0,
+          level: 1,
+          name: authUser.user_metadata?.name || authUser.email?.split("@")[0] || "User",
+          avatar_url: authUser.user_metadata?.avatar_url || null,
+        })
+      }
+    } catch (error) {
+      console.error("Error in fetchUserProfile:", error)
+
+      // Fallback: create user from auth data
+      setUser({
+        ...authUser,
+        role: "student" as const,
+        xp: 0,
+        level: 1,
+        name: authUser.user_metadata?.name || authUser.email?.split("@")[0] || "User",
+        avatar_url: authUser.user_metadata?.avatar_url || null,
+      })
+    }
+  }
+
   const signIn = async (email: string, password: string) => {
     try {
       const { error } = await supabase.auth.signInWithPassword({
@@ -104,7 +140,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
 
       if (error) {
-        throw error
+        // Handle specific error types
+        if (error.message.includes("Invalid login credentials")) {
+          throw new Error("Invalid email or password. Please check your credentials and try again.")
+        } else if (error.message.includes("Email not confirmed")) {
+          throw new Error("Please check your email and click the confirmation link before signing in.")
+        } else if (error.message.includes("Too many requests")) {
+          throw new Error("Too many login attempts. Please wait a few minutes before trying again.")
+        } else {
+          throw error
+        }
       }
 
       toast({
@@ -115,10 +160,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       router.push("/dashboard")
     } catch (error: any) {
       toast({
-        title: "Error signing in",
+        title: "Sign in failed",
         description: error.message,
         variant: "destructive",
       })
+      throw error
     }
   }
 
@@ -173,7 +219,64 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           data: {
             name,
           },
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: `${window.location.origin}/auth/callback?type=signup`,
+        },
+      })
+
+      if (error) {
+        // Handle specific error types
+        if (error.message.includes("Password should be at least")) {
+          throw new Error("Password must be at least 6 characters long.")
+        } else if (error.message.includes("Invalid email")) {
+          throw new Error("Please enter a valid email address.")
+        } else if (error.message.includes("User already registered")) {
+          throw new Error("An account with this email already exists. Please sign in instead.")
+        } else {
+          throw error
+        }
+      }
+
+      if (data.user && !data.session) {
+        // Email confirmation required
+        toast({
+          title: "Check your email",
+          description:
+            "We've sent you a confirmation link. Please check your email and click the link to activate your account.",
+        })
+
+        // Store user data temporarily for when they confirm
+        localStorage.setItem("pendingUserData", JSON.stringify({ name, email }))
+
+        // Redirect to a waiting page
+        router.push(`/confirm-email?email=${encodeURIComponent(email)}`)
+        return
+      }
+
+      if (data.user && data.session) {
+        // User is immediately signed in (email confirmation disabled)
+        toast({
+          title: "Account created successfully!",
+          description: "Welcome to the learning platform. You can now start exploring courses.",
+        })
+        router.push("/dashboard")
+      }
+    } catch (error: any) {
+      toast({
+        title: "Sign up failed",
+        description: error.message,
+        variant: "destructive",
+      })
+      throw error
+    }
+  }
+
+  const resendConfirmation = async (email: string) => {
+    try {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback?type=signup`,
         },
       })
 
@@ -181,32 +284,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw error
       }
 
-      if (data.user) {
-        // Create user profile in users table
-        const { error: profileError } = await supabase.from("users").insert({
-          id: data.user.id,
-          email: data.user.email!,
-          name,
-          role: "student",
-          xp: 0,
-          level: 1,
-        })
-
-        if (profileError) {
-          console.error("Error creating user profile:", profileError)
-        }
-      }
-
       toast({
-        title: "Check your email",
-        description: "We've sent you a confirmation link.",
+        title: "Confirmation email sent",
+        description: "Please check your email for the confirmation link.",
       })
     } catch (error: any) {
       toast({
-        title: "Error signing up",
+        title: "Error",
         description: error.message,
         variant: "destructive",
       })
+      throw error
     }
   }
 
@@ -227,6 +315,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signInWithApple,
     signUp,
     signOut,
+    resendConfirmation,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

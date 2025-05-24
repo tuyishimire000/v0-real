@@ -12,17 +12,33 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input"
 import { useAuth } from "@/components/auth-provider"
 
-const formSchema = z.object({
-  name: z.string().min(2, { message: "Name must be at least 2 characters" }),
-  email: z.string().email({ message: "Please enter a valid email address" }),
-  password: z.string().min(8, { message: "Password must be at least 8 characters" }),
-})
+const formSchema = z
+  .object({
+    name: z
+      .string()
+      .min(2, { message: "Name must be at least 2 characters" })
+      .max(50, "Name must be less than 50 characters"),
+    email: z.string().email({ message: "Please enter a valid email address" }).min(1, "Email is required"),
+    password: z
+      .string()
+      .min(8, { message: "Password must be at least 8 characters" })
+      .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, {
+        message: "Password must contain at least one uppercase letter, one lowercase letter, and one number",
+      }),
+    confirmPassword: z.string(),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: "Passwords don't match",
+    path: ["confirmPassword"],
+  })
 
 export default function RegisterPage() {
   const { signUp, signInWithGoogle, signInWithApple } = useAuth()
   const [isLoading, setIsLoading] = useState(false)
   const [isGoogleLoading, setIsGoogleLoading] = useState(false)
   const [isAppleLoading, setIsAppleLoading] = useState(false)
+  const [formError, setFormError] = useState("")
+  const [passwordStrength, setPasswordStrength] = useState(0)
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -30,13 +46,21 @@ export default function RegisterPage() {
       name: "",
       email: "",
       password: "",
+      confirmPassword: "",
     },
   })
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     setIsLoading(true)
-    await signUp(values.email, values.password, values.name)
-    setIsLoading(false)
+    setFormError("")
+
+    try {
+      await signUp(values.email, values.password, values.name)
+    } catch (error: any) {
+      setFormError(error.message)
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   async function handleGoogleSignIn() {
@@ -49,6 +73,16 @@ export default function RegisterPage() {
     setIsAppleLoading(true)
     await signInWithApple()
     setIsAppleLoading(false)
+  }
+
+  const checkPasswordStrength = (password: string) => {
+    let strength = 0
+    if (password.length >= 8) strength++
+    if (/[a-z]/.test(password)) strength++
+    if (/[A-Z]/.test(password)) strength++
+    if (/\d/.test(password)) strength++
+    if (/[^a-zA-Z\d]/.test(password)) strength++
+    return strength
   }
 
   return (
@@ -94,6 +128,53 @@ export default function RegisterPage() {
                   <FormItem>
                     <FormLabel>Password</FormLabel>
                     <FormControl>
+                      <Input
+                        type="password"
+                        onChange={(e) => {
+                          field.onChange(e)
+                          setPasswordStrength(checkPasswordStrength(e.target.value))
+                        }}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                    <div className="space-y-2">
+                      <div className="flex gap-1">
+                        {[1, 2, 3, 4, 5].map((level) => (
+                          <div
+                            key={level}
+                            className={`h-1 flex-1 rounded ${
+                              level <= passwordStrength
+                                ? passwordStrength <= 2
+                                  ? "bg-red-500"
+                                  : passwordStrength <= 3
+                                    ? "bg-yellow-500"
+                                    : "bg-green-500"
+                                : "bg-gray-200"
+                            }`}
+                          />
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Password strength:{" "}
+                        {passwordStrength <= 2
+                          ? "Weak"
+                          : passwordStrength <= 3
+                            ? "Medium"
+                            : passwordStrength <= 4
+                              ? "Strong"
+                              : "Very Strong"}
+                      </p>
+                    </div>
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="confirmPassword"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Confirm Password</FormLabel>
+                    <FormControl>
                       <Input type="password" {...field} />
                     </FormControl>
                     <FormMessage />
@@ -106,6 +187,9 @@ export default function RegisterPage() {
               </Button>
             </form>
           </Form>
+          {formError && (
+            <div className="p-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md">{formError}</div>
+          )}
           <div className="relative">
             <div className="absolute inset-0 flex items-center">
               <span className="w-full border-t" />
